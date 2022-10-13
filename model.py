@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 from config_path import opt
-
+import math
+from torch.autograd import Variable
 
 class TabTransformer(nn.Module):
     
@@ -43,6 +44,38 @@ class TabTransformer(nn.Module):
         return fe_item_ebd
     
 
+class PositionalEncoder(nn.Module):
+    def __init__(self, d_model, max_seq_length, dropout=0.1):
+        super().__init__()
+        
+        self.d_model = d_model
+        self.dropout = nn.Dropout(dropout)
+        
+        pe = torch.zeros(max_seq_length, d_model)
+        
+        for pos in range(max_seq_length):
+            for i in range(0, d_model, 2):
+                pe[pos, i] = math.sin(pos/(10000**(2*i/d_model)))
+                pe[pos, i+1] = math.cos(pos/(10000**((2*i+1)/d_model)))
+        pe = pe.unsqueeze(0)        
+        self.register_buffer('pe', pe)
+    
+    def forward(self, x):
+        
+        x = x*math.sqrt(self.d_model)
+        seq_length = x.size(1)
+        
+        pe = Variable(self.pe[:, :seq_length], requires_grad=False)
+        
+        if x.is_cuda:
+            pe.cuda()
+        # cộng embedding vector với pe 
+        x = x + pe
+        x = self.dropout(x)
+        
+        return x
+    
+    
 class TransformerLayer(nn.Module):
     
     def __init__(self):
@@ -55,7 +88,7 @@ class TransformerLayer(nn.Module):
                                                                             activation=nn.LeakyReLU(0.1),
                                                                             dropout=0.1), self.n).to(opt.device)
         self.inplanes = opt.numbers_of_hst_films
-        self.position_embeddings = nn.Parameter(torch.zeros(1, self.inplanes + 1, 32))
+        self.pe = PositionalEncoder(d_model=self.d_model, max_seq_length=opt.numbers_of_hst_films+1, dropout=0.1)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, 32))
         
     def forward(self, x, list_rating):
@@ -67,11 +100,11 @@ class TransformerLayer(nn.Module):
         else:
             ratings = torch.FloatTensor(list_rating).to(opt.device).unsqueeze(-1)
         fe_user_prefer = torch.mul(items, ratings)
-        fe_user_prefer = torch.cat((cls_tokens, fe_user_prefer), dim=1)
-        fe_user_prefer = fe_user_prefer + self.position_embeddings
+        fe_user_prefer = torch.cat((fe_user_prefer, cls_tokens), dim=1)
+        fe_user_prefer = self.pe(fe_user_prefer)
         fe_user_prefer = self.transformer(fe_user_prefer)
         # print(fe_user_prefer.size())
-        return fe_user_prefer[:, 0]
+        return fe_user_prefer[:, -1]
 
 
 class DeepModel(nn.Module):
@@ -133,3 +166,4 @@ class TV360Recommend(nn.Module):
         output = torch.add(fe_pairwise, fe_deep)
         output = torch.sigmoid(output)
         return output
+
