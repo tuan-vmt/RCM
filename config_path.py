@@ -2,9 +2,9 @@ folder = "demographic_data/"
 path_file_user_info = "demographic_06.csv"
 path_film_series = "tv360_film_series.csv"
 path_film_episode = "tv360_film_episode.csv"
-numbers_of_hst_films = 10
+numbers_of_hst_films = 5
 numbers_of_user = 4000
-device = "cuda:1"
+device = "cuda:0"
 
 dict_opt = {
     'path_file_user_info': path_file_user_info,

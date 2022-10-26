@@ -34,23 +34,18 @@ ccai_drop_nan = pd.read_csv(opt.folder + opt.path_file_user_info)
 ccai_drop_nan.dropna(inplace=True)
 pd_film_series_drop_nan = pd.read_csv(opt.folder + "data/"  + opt.path_film_series)
 pd_film_series_drop_nan.dropna(inplace=True)
-pd_film_episode_drop_nan = pd.read_csv(opt.folder + "data/"  + opt.path_film_episode)
-pd_film_episode_drop_nan.dropna(inplace=True)
         
 onehot_is_series=OneHotEncoder(handle_unknown='ignore',sparse=False)
 onehot_is_series.fit(pd_film_series_drop_nan[['is_series']])
-
+all_films_id = pd.read_csv(opt.folder + "data/" + opt.path_film_series)['series_id'].apply(lambda x: str(x)).tolist()
 onehot_categorical=MultiLabelBinarizer()
-all_category = get_all_category(pd_film_series, pd_film_episode)
+all_category = get_all_category(pd_film_series)
 onehot_categorical.fit([all_category])
     
 onehot_country=OneHotEncoder(handle_unknown='ignore',sparse=False)
 pd_film_series_country = pd.DataFrame(pd_film_series, columns = ['country'])
 pd_film_series_country = pd_film_series_country[pd_film_series_country['country'].notnull()]
-pd_film_episode_country = pd.DataFrame(pd_film_episode, columns = ['country'])
-pd_film_episode_country = pd_film_episode_country[pd_film_episode_country['country'].notnull()]
-pd_country = pd.concat([pd_film_series_country, pd_film_episode_country])
-onehot_country.fit(pd_country[['country']])
+onehot_country.fit(pd_film_series_country[['country']])
 model_tokenizer= AutoTokenizer.from_pretrained("vinai/phobert-base")
 bertsentence= SentenceTransformer('VoVanPhuc/sup-SimCSE-VietNamese-phobert-base', device=opt.device)
             
@@ -74,6 +69,7 @@ def get_ft_user(user_id):
     return ccai_embedding
 
 def get_history(user_id):
+    print("MUANADNJSNDJSNDJ", user_id)
     path_list_file_log_film = []
     for file_path in os.listdir(opt.folder + "data/"):
         if file_path.find("log_film") >= 0:
@@ -81,13 +77,16 @@ def get_history(user_id):
     l_hst_items = []
     total_watch_duration = {}       
     for log_film_path in path_list_file_log_film:
-        # print(log_film_path)
+        print(log_film_path)
         hst_users_info = pd.read_csv(opt.folder + "data/"  + log_film_path)
-        hst_users_info = hst_users_info.dropna() 
+        # hst_users_info = hst_users_info.dropna() 
         hst_users_info['content_id'] = hst_users_info['content_id'].apply(lambda x: clean(x))
         hst_users_info['user_id'] = hst_users_info['user_id'].apply(lambda x: clean(x))
-        
-        hst_items_id = unique(list(hst_users_info[hst_users_info['user_id'] == user_id]['content_id']))
+        # print(hst_users_info['user_id'])
+        hst_users_info = hst_users_info[(hst_users_info['content_id'].isin(all_films_id)) & (hst_users_info['user_id'] == user_id)]
+        hst_items_id = unique(list(hst_users_info['content_id']))
+        print(hst_items_id)
+        # print(hst_users_info)
         # l_hst_items = [(u,int(log_film_path[9:13])) for u in hst_items]
         for item in hst_items_id:
             watch_duration = list(hst_users_info[(hst_users_info['user_id'] == user_id) & (hst_users_info['content_id'] == str(item))]['watch_duration'])[0]
@@ -96,7 +95,7 @@ def get_history(user_id):
                 total_watch_duration[item] = watch_duration
             else:
                 total_watch_duration[item] += watch_duration
-    
+    print(l_hst_items)
     def sort_date(date):
         return date[1]               
     l_hst_items.sort(reverse=False, key = sort_date)
@@ -115,17 +114,12 @@ def get_history(user_id):
     
     return hst_items, total_watch_duration     
 
-def embedding_item(record, type_record, bertsentence,onehot_is_series,onehot_country,onehot_categorical,bert_words):
+def embedding_item(record, bertsentence,onehot_is_series,onehot_country,onehot_categorical,bert_words):
     data={}
     
-    if type_record == "series":
-        if type(record['description']) != str:
-            return None
-        data['description']= normalizeString(str(record['series_name']) + " " + str(record['description']))
-    else:  
-        if type(record['episode_description']) != str:
-            return None      
-        data['description']= normalizeString(str(record['episode_name'])+ " " + str(record['episode_description']))
+    if type(record['description']) != str:
+        return None
+    data['description']= normalizeString(str(record['series_name']) + " " + str(record['description']))
         
     data['country']=[record['country']]
     try:
@@ -186,30 +180,21 @@ def embedding_item(record, type_record, bertsentence,onehot_is_series,onehot_cou
     if director.shape[1]<16:
         director=F.pad(director,(1,15-director.shape[1]),mode='constant', value=0)
     elif director.shape[1]>16:
-        director=director[:,:16]    
-
-    # print(description_emb.size())
-    # print(country.size())
-    # print(category.size())
-    # print(actor.size())
-    # print(director.size())
-    # print(is_series_emb.size())
-    # print(duration.size())
-    # print(release_year.size())
+        director=director[:,:16]
     return (normalize(description_emb).unsqueeze(0).to(opt.device), normalize(country).unsqueeze(0).to(opt.device), normalize(category).unsqueeze(0).to(opt.device),normalize(actor).unsqueeze(0).to(opt.device), normalize(director).unsqueeze(0).to(opt.device), is_series_emb.unsqueeze(0).to(opt.device), duration.unsqueeze(0).to(opt.device),release_year.unsqueeze(0).to(opt.device))
 
 
 def get_ft_item(film_id):
-    record_trg_item, type_record_trg_item = get_record_by_item_id(film_id, pd_film_series, pd_film_episode)
-    fe_record_trg_item = embedding_item(record_trg_item, type_record_trg_item, bertsentence,onehot_is_series,onehot_country,onehot_categorical,model_tokenizer)
+    record_trg_item = get_record_by_item_id(film_id, pd_film_series)
+    fe_record_trg_item = embedding_item(record_trg_item, bertsentence,onehot_is_series,onehot_country,onehot_categorical,model_tokenizer)
     return fe_record_trg_item,record_trg_item
 
 
 if __name__ == "__main__":
-    ccai_embedding = get_ft_user("69959644").unsqueeze(0)
-    fe_trg_item,_ = get_ft_item("732613")
+    ccai_embedding = get_ft_user("145663723").unsqueeze(0)
+    fe_trg_item,_ = get_ft_item("10720")
     
-    hst_film_id, total_watch_duration = get_history("69959644")
+    hst_film_id, total_watch_duration = get_history("145663723")
     fe_hst_items = []
     list_rating = []
     for film_id in hst_film_id:
@@ -221,7 +206,7 @@ if __name__ == "__main__":
         fe_hst_items.append(fe_item)
     print(list_rating)    
     model = TV360Recommend().to(opt.device)
-    model.load_state_dict(torch.load("save_models1/30.pth"))
+    model.load_state_dict(torch.load("TV360/RCM/save_models/5.pth"))
     model.eval()
     with torch.no_grad():
         inputs = (fe_hst_items, fe_trg_item, ccai_embedding, [list_rating])

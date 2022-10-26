@@ -15,15 +15,12 @@ from model import TV360Recommend
 from torch import nn
 from config_path import opt
 import time
-print("Start")
-a = [2,3]
-b=[4,5]
-print(zip(a,b))
-st = time.time()
-hst_users_info = pd.read_csv(opt.folder + "data/" + "log_film_0601_0605.csv")
-hst_users_info_group_by_user = hst_users_info.groupby(['user_id'])['watch_duration'].apply(list).reset_index(name='film_id').set_index('user_id')['film_id'].to_dict()
-print("TIme: ", time.time() - st)
-print(hst_users_info_group_by_user['69959644'])
+
+all_films_id = pd.read_csv(opt.folder + "data/" + opt.path_film_episode)
+
+x = all_films_id[['episode_id', 'series_id']].apply(list).to_dict()
+print(x)
+
 # # b = torch.tensor([1,1,1,1,0,0,1,1]).to("cuda:0")
 # # print(get_evaluation(a, b))
 # # b = torch.rand(8, 1, 1)

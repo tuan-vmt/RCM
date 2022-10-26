@@ -61,12 +61,11 @@ if __name__ == "__main__":
     train_dataloader = torch.utils.data.DataLoader(train_dataset, batch_size, collate_fn=collate_fn, shuffle=True)
     val_dataloader = torch.utils.data.DataLoader(val_dataset, batch_size, collate_fn=collate_fn, shuffle=False)
     model = TV360Recommend().to(opt.device)
-    model.load_state_dict(torch.load("TV360/RCM/save_models/300.pth"))
     #Learning Rate
-    optimizer = optim.Adam(model.parameters(), lr=1e-5, weight_decay=0.0005)
+    optimizer = optim.Adam(model.parameters(), lr=1e-4, weight_decay=0.0005)
     
     #Loss Function
-    criterior = nn.BCELoss()
+    criterior = nn.MSELoss()
     
     for epoch in range(num_epochs):
         print("Epoch {}/{}".format(epoch, num_epochs))
@@ -88,6 +87,7 @@ if __name__ == "__main__":
             # print(outputs)
             # print(labels)
             # epoch_corrects += get_evaluation(outputs, labels)
+            
             loss = criterior(outputs, labels)
             count_loss += 1
             count_acc += len(outputs)
@@ -103,10 +103,11 @@ if __name__ == "__main__":
             PATH = "TV360/RCM/save_models/" + "{}.pth".format(epoch)
             torch.save(model.state_dict(), PATH)         
         print("Train loss: {:.10f}".format(epoch_loss))
-        #Evaling-------------------------------------------------
+        # print(epoch_accuracy)
+        #Eval
         model.eval()
         epoch_loss = 0.0
-        # epoch_corrects = 0
+        epoch_corrects = 0
         count_loss = 0
         count_acc = 0
         with torch.no_grad():  
@@ -130,3 +131,4 @@ if __name__ == "__main__":
                 PATH = "TV360/RCM/save_models/" + str(epoch)+"_best_accuracy.pth"
                 torch.save(model.state_dict(), PATH)
             print("Valid loss: {:.10f}".format(epoch_loss))
+            # print(epoch_accuracy)

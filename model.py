@@ -15,7 +15,7 @@ class TabTransformer(nn.Module):
         self.n = 6  # Number of Attention Layer
         self.transformer = nn.TransformerEncoder(nn.TransformerEncoderLayer(d_model=16, nhead=8, batch_first=True,
                                                                             activation=nn.LeakyReLU(0.1),
-                                                                            dropout=0.1), self.n)
+                                                                            dropout=0.3), self.n)
 
     def forward(self, x):
         # Descriptions Embedding
@@ -86,13 +86,14 @@ class TransformerLayer(nn.Module):
         self.transformer = nn.TransformerEncoder(nn.TransformerEncoderLayer(d_model=self.d_model, nhead=8,
                                                                             batch_first=True,
                                                                             activation=nn.LeakyReLU(0.1),
-                                                                            dropout=0.1), self.n).to(opt.device)
+                                                                            dropout=0.3), self.n).to(opt.device)
         self.inplanes = opt.numbers_of_hst_films
         self.pe = PositionalEncoder(d_model=self.d_model, max_seq_length=opt.numbers_of_hst_films+1, dropout=0.1)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, 32))
         
     def forward(self, x, list_rating):
         cls_tokens = self.cls_token.expand(x[0].shape[0], -1, -1)
+        # print(cls_tokens)
         items = torch.stack(x).float().to(opt.device).permute(1, 0, 2, 3)\
             .reshape(-1, opt.numbers_of_hst_films, self.d_model)
         if len(list_rating) > 1:
@@ -112,11 +113,9 @@ class DeepModel(nn.Module):
     def __init__(self, input_dim=129):
         super().__init__()
         self.fc = nn.Sequential(
-            nn.Linear(input_dim, 256),
+            nn.Linear(input_dim, 64),
             nn.LeakyReLU(0.1),
-            nn.Linear(256, 128),
-            nn.LeakyReLU(0.1),
-            nn.Linear(128, 32),
+            nn.Linear(64, 32),
             nn.LeakyReLU(0.1),
             nn.Linear(32, 1)
         )
@@ -166,4 +165,3 @@ class TV360Recommend(nn.Module):
         output = torch.add(fe_pairwise, fe_deep)
         output = torch.sigmoid(output)
         return output
-
