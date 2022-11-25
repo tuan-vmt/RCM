@@ -5,7 +5,7 @@ import argparse
 import torch
 from tqdm import tqdm
 import model
-from model import TV360Recommend
+from new_model import TV360Recommend
 from dataloader import Tv360Dataset, normalizeString, clean, unique, get_all_category, get_record_by_item_id, find_seri_id
 import os
 # torch.multiprocessing.set_start_method('spawn')
@@ -29,8 +29,9 @@ from torch.nn import functional as F
 from transformers import AutoModel, AutoTokenizer
 from scipy import sparse
 import bottleneck as bn
+import pickle5 as pickle
 
-def ndcg(X_pred, heldout_batch, k=200):
+def ndcg(X_pred, heldout_batch, k=50):
     '''
     normalized discounted cumulative gain@k for binary relevance
     ASSUMPTIONS: all the 0's in heldout_data indicate 0 relevance
@@ -56,7 +57,7 @@ def ndcg(X_pred, heldout_batch, k=200):
     return DCG / IDCG
 
 
-def recall(X_pred, heldout_batch, k=200):
+def recall(X_pred, heldout_batch, k=50):
     batch_users = X_pred.shape[0]
     idx = bn.argpartition(-X_pred, k, axis=1)
     X_pred_binary = np.zeros_like(X_pred, dtype=bool)
@@ -118,6 +119,7 @@ def embedding_item(duration, record, bertsentence,onehot_is_series,onehot_countr
     data['duration']= duration
     
     if np.isnan(record['release_year']):
+        # return None
         data['release_year'] = 2022
     else:        
         data['release_year']=record['release_year']
@@ -163,7 +165,7 @@ def embedding_item(duration, record, bertsentence,onehot_is_series,onehot_countr
     elif director.shape[1]>16:
         director=director[:,:16]
     return (normalize(description_emb).unsqueeze(0).to(args.device), normalize(country).unsqueeze(0).to(args.device), normalize(category).unsqueeze(0).to(args.device),normalize(actor).unsqueeze(0).to(args.device), normalize(director).unsqueeze(0).to(args.device), is_series_emb.unsqueeze(0).to(args.device), duration.unsqueeze(0).to(args.device),release_year.unsqueeze(0).to(args.device))
-
+    
 def get_ft_user(user_id):
     try:
         user_info = ccai[ccai['user_id'] == int(user_id)].to_dict('records')[0]
@@ -189,11 +191,11 @@ def get_ft_user(user_id):
 
 def parse_opt(known=False):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', type=str, default='TV360/RCM/save_models/31_best_accuracy.pth', help='initial weights path')
-    parser.add_argument('--batch-size', type=int, default=256, help='total batch size for all GPUs, -1 for autobatch')
+    parser.add_argument('--weights', type=str, default='TV360/RCM/save_models/123_best_accuracy.pth', help='initial weights path')
+    parser.add_argument('--batch-size', type=int, default=1024, help='total batch size for all GPUs, -1 for autobatch')
     parser.add_argument('--device', default='cuda:0', help='cuda device, i.e. cuda:0 or 0,1,2,3 or cpu')
-    parser.add_argument('--start-day', type=int, default=20220625, help='Date from 20220625 to 20220630')
-    parser.add_argument('--end-day', type=int, default=20220630, help='Date from 20220625 to 20220630')
+    parser.add_argument('--start-day', type=int, default=20220626, help='Date from 20220625 to 20220630')
+    parser.add_argument('--end-day', type=int, default=20220626, help='Date from 20220625 to 20220630')
 
     args = parser.parse_known_args()[0] if known else parser.parse_args()
     return args
@@ -215,17 +217,6 @@ if __name__ == "__main__":
             path_list_file_log_film.append(file_path)
     users_info = pd.read_csv(folder + path_file_user_info)
     # users_info.dropna()
-    eval_users_info = pd.read_csv(opt.folder + "data/log_film_0625_0630.csv")
-    # eval_users_info.dropna()
-    eval_users_info['user_id'] = eval_users_info['user_id'].apply(lambda x: clean(x))
-    eval_users_info['content_id'] = eval_users_info['content_id'].apply(lambda x: find_seri_id(x))
-    eval_users_info = eval_users_info[(eval_users_info['content_id'] != "-1") & (eval_users_info['user_id'] != "-1")]
-    list_time = range(args.start_day, args.end_day + 1)
-    eval_users_info = eval_users_info[eval_users_info['partition'].isin(list_time)]
-    # print(eval_users_info)
-    all_users_id_eval = [str(user_id) for user_id in eval_users_info['user_id'].tolist()]
-    eval_users_info = eval_users_info.groupby(["user_id"])['content_id'].apply(list).apply(lambda x: unique(x)).reset_index()
-    eval_users_info = eval_users_info[['user_id', 'content_id']].set_index('user_id').T.to_dict('list')
     # users_items = {}
     list_hst_users_info = []
     for log_film_path in path_list_file_log_film:
@@ -251,14 +242,30 @@ if __name__ == "__main__":
         list_film_id.remove(item_id) 
     
     list_film_id.sort()
-    print(list_film_id)
+    print("Length Film Eval:", len(list_film_id))
     for i in range(8):
         list_ft_i = [dict_fe_item[item_id][i] for item_id in list_film_id]
         ft_i = torch.cat(list_ft_i, 0)
         # print(ft_i.size())
         list_ft_film.append(ft_i)              
     # print(dict_fe_item['14495'])
-    length_list_ft_film = len(list_film_id)      
+    length_list_ft_film = len(list_film_id)
+    
+    #List Item Eval
+    eval_users_info = pd.read_csv(opt.folder + "data/log_film_0625_0630.csv")
+    # eval_users_info.dropna()
+    eval_users_info['user_id'] = eval_users_info['user_id'].apply(lambda x: clean(x))
+    eval_users_info['content_id'] = eval_users_info['content_id'].apply(lambda x: find_seri_id(x))
+    eval_users_info = eval_users_info[eval_users_info['content_id'].isin(list_film_id)]
+    eval_users_info = eval_users_info[(eval_users_info['content_id'] != "-1") & (eval_users_info['user_id'] != "-1")]
+    list_time = range(args.start_day, args.end_day + 1)
+    eval_users_info = eval_users_info[eval_users_info['partition'].isin(list_time)]
+    # print(eval_users_info)
+    all_users_id_eval = [str(user_id) for user_id in eval_users_info['user_id'].tolist()]
+    eval_users_info = eval_users_info.groupby(["user_id"])['content_id'].apply(list).apply(lambda x: unique(x)).reset_index()
+    eval_users_info = eval_users_info[['user_id', 'content_id']].set_index('user_id').T.to_dict('list')
+    
+    #Hst Film      
     hst_users_info = pd.concat(list_hst_users_info, ignore_index=True, sort=False)    
     # hst_users_info = pd.read_csv(opt.folder + "data/log_film_0601_0605.csv")
     hst_users_info['user_id'] = hst_users_info['user_id'].apply(lambda x: clean(x))
@@ -267,35 +274,63 @@ if __name__ == "__main__":
     hst_users_info = hst_users_info[hst_users_info['content_id'].isin(list_film_id)]
     hst_users_info = hst_users_info[(hst_users_info['content_id'] != "-1") & (hst_users_info['user_id'] != "-1")]
     hst_film_id_group_by_user = hst_users_info.groupby(["user_id", "content_id"])['watch_duration'].agg([("watch_duration", "sum")]).reset_index()
-    hst_film_id_group_by_user['partition'] = hst_users_info.groupby(["user_id", "content_id"])['partition'].apply(lambda x: min(x)).reset_index()['partition']
-    
-    users_items = hst_film_id_group_by_user.groupby(['user_id'])['content_id'].apply(list).apply(lambda x: x if len(x) >= opt.numbers_of_hst_films else -1).reset_index()
+    # hst_film_id_group_by_user['partition'] = hst_users_info.groupby(["user_id", "content_id"])['partition'].apply(lambda x: min(x)).reset_index()['partition']
+    hst_film_id_group_by_user['partition'] = hst_users_info.groupby(["user_id", "content_id"])['partition'].apply(list).reset_index()['partition']
+    users_items = hst_film_id_group_by_user.groupby(['user_id'])['content_id'].apply(list).apply(lambda x: x if len(x) > 0 else -1).reset_index()
+    # users_items = hst_film_id_group_by_user.groupby(['user_id'])['content_id'].apply(list).apply(lambda x: x if len(x) >= opt.numbers_of_hst_films else -1).reset_index()
+    #apply(lambda x: x if len(x) >= opt.numbers_of_hst_films else -1)
     users_items['partition'] = hst_film_id_group_by_user.groupby('user_id')['partition'].apply(list).reset_index()['partition']
     users_items['watch_duration'] = hst_film_id_group_by_user.groupby('user_id')['watch_duration'].apply(list).reset_index()['watch_duration']
     users_items = users_items[users_items['content_id'] != -1]
-    print(users_items)
+    # print(users_items)
     users_items = users_items.set_index('user_id').T.to_dict('list')
             
+    # def sort_date(value):
+    #     v = list(zip(value[0], value[1], value[2]))
+    #     v.sort(key=lambda x: x[1])
+    #     # print(list(zip(value[0], value[1], value[2])).sort(key=lambda x: x[1]))
+    #     if len(v) < opt.numbers_of_hst_films:
+    #         v.extend((opt.numbers_of_hst_films - len(v)) * [v[-1]])
+    #     return v[-opt.numbers_of_hst_films:]
+    # hst_users_items = {k: sort_date(v) for k, v in users_items.items()}
+    
     def sort_date(value):
-        v = list(zip(value[0], value[1], value[2]))
+        # v = list(zip(value[0], value[1], value[2]))
+        # v.sort(key=lambda x: x[1])
+        # # print(list(zip(value[0], value[1], value[2])).sort(key=lambda x: x[1]))
+        # return v
+        v = []
+        for film_id, list_date, watch_duration in zip(value[0], value[1], value[2]):
+            list_date = list(set(list_date))
+            len_date = len(list_date)            
+            v.extend(list(zip(len_date*[film_id], list_date, len_date*[watch_duration])))
         v.sort(key=lambda x: x[1])
-        # print(list(zip(value[0], value[1], value[2])).sort(key=lambda x: x[1]))
-        return v[-opt.numbers_of_hst_films:]
-    hst_users_items = {k: sort_date(v) for k, v in users_items.items()}         
+        if len(v) < opt.numbers_of_hst_films:
+            v.extend((opt.numbers_of_hst_films - len(v)) * [v[-1]])
+        return v[-opt.numbers_of_hst_films:]       
+    
+    hst_users_items = {k: sort_date(v) for k, v in users_items.items()} 
            
     onehot_film = MultiLabelBinarizer()
     onehot_film.fit([list_film_id])        
     heldout_batch = []
     pred = []
-    print(hst_users_items)
+    # print(hst_users_items)
     print("Length User: ", len(list(hst_users_items.keys())))       
     with torch.no_grad():   
         for i, key in enumerate(hst_users_items.keys()):
-            if i > 20:
+            # print(i)
+            if i > 200:
                 break
             # print(eval_users_info[key])
+            if len(eval_users_info[key]) == 0:
+                print("Empty Film Item")
+                continue
             heldout_batch_key = onehot_film.transform(eval_users_info[key])[0]
-            print(heldout_batch_key)
+            if 1 not in heldout_batch_key:
+                print(key)
+                print(eval_users_info[key])
+                exit()
             pred_key = []
             hst_films_key = hst_users_items[key]
             ccai_embedding = get_ft_user(key)
@@ -313,11 +348,15 @@ if __name__ == "__main__":
                     batch_fe_item.append(ft_i)
                 # rating = min(float(watch_duration)/float(dict_films_duration[int(film_id)][0]), 1)
                 
-                prefer = float(watch_duration)/float(dict_films_duration[int(film_id)][0])
-                if prefer > opt.prefer_threshold:
+                # prefer = float(watch_duration)/float(dict_films_duration[int(film_id)][0])
+                # if prefer > opt.prefer_threshold:
+                #     rating = 1
+                # else:
+                #     rating = prefer/opt.prefer_threshold
+                if watch_duration > opt.duration_threshold:
                     rating = 1
                 else:
-                    rating = prefer/opt.prefer_threshold
+                    rating = watch_duration/opt.duration_threshold  
                 rating = torch.cat(args.batch_size*[torch.tensor([rating])], 0)
                 
                 list_rating.append(rating)

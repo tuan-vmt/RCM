@@ -2,9 +2,10 @@ folder = "demographic_data/"
 path_file_user_info = "demographic_06.csv"
 path_film_series = "tv360_film_series.csv"
 path_film_episode = "tv360_film_episode.csv"
-numbers_of_hst_films = 40
+numbers_of_hst_films = 10
 numbers_of_user = 4000
-prefer_threshold = 0.1
+duration_threshold = 300
+
 device = "cuda:0"
 
 dict_opt = {
@@ -15,7 +16,7 @@ dict_opt = {
     'numbers_of_hst_films': numbers_of_hst_films,
     'numbers_of_user': numbers_of_user,
     'device': device,
-    'prefer_threshold': prefer_threshold
+    'duration_threshold': duration_threshold
 }
     
 class DotDict(dict):

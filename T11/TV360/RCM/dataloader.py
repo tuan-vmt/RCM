@@ -18,9 +18,7 @@ from sklearn.preprocessing import OneHotEncoder
 from sklearn.preprocessing import LabelEncoder
 from transformers import AutoModel, AutoTokenizer
 from torch.nn.functional import normalize
-
-phobert = AutoModel.from_pretrained("vinai/phobert-base")
-model_tokenizer = AutoTokenizer.from_pretrained("vinai/phobert-base")
+import pickle5 as pickle
 
 all_films_id = pd.read_csv(opt.folder + "data/" + opt.path_film_series)['series_id'].apply(lambda x: str(x)).tolist()
 all_episode_id = pd.read_csv(opt.folder + "data/" + opt.path_film_episode)
@@ -89,8 +87,8 @@ def split_data():
     hst_users_info['content_id'] = hst_users_info['content_id'].apply(lambda x: find_seri_id(x))
     hst_users_info = hst_users_info[(hst_users_info['content_id'] != "-1") & (hst_users_info['user_id'] != "-1")]
     hst_film_id_group_by_user = hst_users_info.groupby(["user_id", "content_id"])['watch_duration'].agg([("watch_duration", "sum")]).reset_index()
-    hst_film_id_group_by_user['partition'] = hst_users_info.groupby(["user_id", "content_id"])['partition'].apply(lambda x: min(x)).reset_index()['partition']
-    
+    hst_film_id_group_by_user['partition'] = hst_users_info.groupby(["user_id", "content_id"])['partition'].apply(list).reset_index()['partition']
+
     users_items = hst_film_id_group_by_user.groupby(['user_id'])['content_id'].apply(list).apply(lambda x: x if len(x) >= 1.5*opt.numbers_of_hst_films else -1).reset_index()
     users_items['partition'] = hst_film_id_group_by_user.groupby('user_id')['partition'].apply(list).reset_index()['partition']
     users_items['watch_duration'] = hst_film_id_group_by_user.groupby('user_id')['watch_duration'].apply(list).reset_index()['watch_duration']
@@ -98,10 +96,18 @@ def split_data():
     users_items = users_items.set_index('user_id').T.to_dict('list')
     print("Time Split 1: ", time.time()- st)        
     def sort_date(value):
-        v = list(zip(value[0], value[1], value[2]))
+        # v = list(zip(value[0], value[1], value[2]))
+        # v.sort(key=lambda x: x[1])
+        # # print(list(zip(value[0], value[1], value[2])).sort(key=lambda x: x[1]))
+        # return v
+        v = []
+        for film_id, list_date, watch_duration in zip(value[0], value[1], value[2]):
+            list_date = list(set(list_date))
+            len_date = len(list_date)            
+            v.extend(list(zip(len_date*[film_id], list_date, len_date*[watch_duration])))
         v.sort(key=lambda x: x[1])
-        # print(list(zip(value[0], value[1], value[2])).sort(key=lambda x: x[1]))
         return v
+    
     users_items = {k: sort_date(v) for k, v in users_items.items()}
     # Sort by Date
     # filter_list_user = list(users_items.keys())
@@ -251,8 +257,7 @@ def get_record_by_item_id(item_id, pd_film_series):
 
 
 class Tv360Dataset(data.Dataset):
-    def __init__(self, bertsentence, hst_users_items, target_users_items, phase="train"):
-        self.bertsentence = bertsentence
+    def __init__(self, hst_users_items, target_users_items, phase="train"):
         self.hst_users_items = hst_users_items[phase]
         self.ccai = pd.read_csv(opt.folder + opt.path_file_user_info)
         self.ccai_drop_nan = pd.read_csv(opt.folder + opt.path_file_user_info)
@@ -267,37 +272,31 @@ class Tv360Dataset(data.Dataset):
         # print(self.pd_film_series['series_id'])
         self.list_ft_user = {}
         self.list_ft_item = {}
-        
-        for i, (user_id, item_id, dates, watch_duration) in enumerate(self.org_target_users_items):
-            if int(item_id) in list(self.pd_film_series['series_id']):              
-                duration = dict_films_duration[int(item_id)][0]
-                if duration == 0:
-                    continue
-                
-                prefer = float(watch_duration) / float(duration)
-                if prefer > opt.prefer_threshold:
-                    self.labels.append(1)
-                else:
-                    self.labels.append(prefer/opt.prefer_threshold)              
-                # self.labels.append(min(float(watch_duration) / float(duration), 1))
-                # self.labels.append(float(watch_duration)/float(duration))
-                self.target_users_items.append((user_id, item_id, dates, watch_duration))
-
-        self.onehot_is_series = OneHotEncoder(handle_unknown='ignore', sparse=False)
-        self.onehot_is_series.fit(self.pd_film_series_drop_nan[['is_series']])
-
-        self.onehot_categorical = MultiLabelBinarizer()
-        all_category = get_all_category(self.pd_film_series)
-        self.onehot_categorical.fit([all_category])
-
-        self.onehot_country = OneHotEncoder(handle_unknown='ignore', sparse=False)
-        pd_film_series_country = pd.DataFrame(self.pd_film_series, columns=['country'])
-        pd_film_series_country = pd_film_series_country[pd_film_series_country['country'].notnull()]
-        self.onehot_country.fit(pd_film_series_country[['country']])
-
         self.onehot_province_user = OneHotEncoder(handle_unknown='ignore', sparse=False)
         self.onehot_province_user.fit(self.ccai_drop_nan[['province_name']])
+        for i, (user_id, item_id, dates, watch_duration) in enumerate(self.org_target_users_items):
+            if int(item_id) in list(self.pd_film_series['series_id']):              
+                # duration = dict_films_duration[int(item_id)][0]
+                # if duration == 0:
+                #     continue
+                
+                # prefer = float(watch_duration) / float(duration)
+                # if prefer > opt.prefer_threshold:
+                #     self.labels.append(1)
+                # else:
+                #     self.labels.append(prefer/opt.prefer_threshold)              
+                # self.labels.append(min(float(watch_duration) / float(duration), 1))
+                # self.labels.append(float(watch_duration)/float(duration))
+                if watch_duration >= 300:
+                    self.labels.append(1)
+                else:
+                    self.labels.append(0)        
+                self.target_users_items.append((user_id, item_id, dates, watch_duration))
 
+        raw_features_file = 'raw_features.pickle'
+        with open(raw_features_file, 'rb') as f:
+            self.data = pickle.load(f)
+        
         print("Len data: --------------------------------", len(self.labels))
         print(self.labels)
 
@@ -328,44 +327,34 @@ class Tv360Dataset(data.Dataset):
             ccai_embedding = torch.FloatTensor(ccai_embedding)
             self.list_ft_user[int(user_id)] = ccai_embedding
             
-        try:
-            record_trg_item = get_record_by_item_id(item_id, self.pd_film_series)
-        except:
-            return None
         # Feature Target Item
-        if self.list_ft_item.get(int(item_id)) != None:
-            fe_record_trg_item = self.list_ft_item[int(item_id)]
-        else:
-            duration = dict_films_duration[int(item_id)][0]        
-            fe_record_trg_item = embedding_dataloader(duration, record_trg_item, self.bertsentence,
-                                                  self.onehot_is_series, self.onehot_country, self.onehot_categorical,
-                                                  model_tokenizer)
-            self.list_ft_item[int(item_id)] = fe_record_trg_item
-            
+        fe_record_trg_item = self.data[str(item_id)]   
         if fe_record_trg_item is None:
             return None
         # Feature History Items
         fe_hst_items = []
         for (item_hst_id, _, total_watch_duration) in list_hst_item_id:
-            duration = dict_films_duration[int(item_id)][0]
-            prefer = float(total_watch_duration) / float(duration)
-            if prefer > opt.prefer_threshold:
+            # duration = dict_films_duration[int(item_id)][0]
+            # prefer = float(total_watch_duration) / float(duration)
+            if total_watch_duration >= opt.duration_threshold:
                 rating = 1
             else:
-                rating = prefer/opt.prefer_threshold
+                rating = float(total_watch_duration) / opt.duration_threshold
+            # rating = float(total_watch_duration) / opt.duration_threshold    
             # rating = min(float(total_watch_duration) / float(duration), 1)
             list_rating.append(rating)
-            try:
-                hst_record_item = get_record_by_item_id(item_hst_id, self.pd_film_series)
-            except:
-                return None
-            if self.list_ft_item.get(int(item_hst_id)) is not None:
-                ebd = self.list_ft_item[int(item_hst_id)]
-            else:
-                duration = dict_films_duration[int(item_hst_id)][0] 
-                ebd = embedding_dataloader(duration, hst_record_item, self.bertsentence, self.onehot_is_series,
-                                       self.onehot_country, self.onehot_categorical, model_tokenizer)
-                self.list_ft_item[int(item_hst_id)] = ebd
+            # try:
+            #     hst_record_item = get_record_by_item_id(item_hst_id, self.pd_film_series)
+            # except:
+            #     return None
+            # if self.list_ft_item.get(int(item_hst_id)) is not None:
+            #     ebd = self.list_ft_item[int(item_hst_id)]
+            # else:
+            #     duration = dict_films_duration[int(item_hst_id)][0] 
+            #     ebd = embedding_dataloader(duration, hst_record_item, self.bertsentence, self.onehot_is_series,
+            #                            self.onehot_country, self.onehot_categorical, model_tokenizer)
+            #     self.list_ft_item[int(item_hst_id)] = ebd
+            ebd = self.data[item_hst_id]
             if ebd is None:
                 return None
             fe_hst_items.append(ebd)

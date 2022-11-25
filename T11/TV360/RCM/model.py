@@ -19,6 +19,7 @@ class TabTransformer(nn.Module):
 
     def forward(self, x):
         # Descriptions Embedding
+        
         fe_descriptions = self.linear1(x[0]).reshape(-1, 1, 64)
         
         # Country Embedding
@@ -137,6 +138,7 @@ class TV360Recommend(nn.Module):
         self.TransformerLayer = TransformerLayer().to(opt.device)
         self.linear_pairwise = nn.Linear(opt.numbers_of_hst_films, 1)
         self.deep_model = DeepModel().to(opt.device)
+        self.fc = nn.Linear(2, 1).to(opt.device)
     
     def forward(self, x):
         fe_hst_items, fe_target_item, ccai_embedding, list_rating = x
@@ -162,7 +164,11 @@ class TV360Recommend(nn.Module):
         # Deep Model
         fe_deep = self.deep_model(fe_user_prefer, fe_target_item, ccai_embedding)
         
+        # print(fe_pairwise.size())
+        # print(fe_deep.size())
         # Add Wide&Deep
-        output = torch.add(fe_pairwise, fe_deep)
+        # output = torch.add(fe_pairwise, fe_deep)
+        output = torch.cat((fe_pairwise, fe_deep), 1)
+        output = self.fc(output)
         output = torch.sigmoid(output)
         return output
