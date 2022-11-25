@@ -10,8 +10,13 @@ import time
 import re
 from sklearn.preprocessing import MultiLabelBinarizer
 import os
+import sys
+from underthesea import text_normalize
 
-
+c = (1 > 0) ? 1 : 0
+a = text_normalize('Ðảm baỏ chất lựơng phòng thí nghịêm hoá học')
+print(a)
+exit()
 films_id = pd.read_csv(opt.folder + "data/" + opt.path_film_series)
 all_episode_id = pd.read_csv(opt.folder + "data/" + opt.path_film_episode)
 # print(type(all_episode_id[['episode_id', 'series_id']]))

@@ -76,95 +76,19 @@ ccai_drop_nan = pd.read_csv(opt.folder + opt.path_file_user_info)
 ccai_drop_nan.dropna(inplace=True)
 pd_film_series_drop_nan = pd.read_csv(opt.folder + "data/"  + opt.path_film_series)
 pd_film_series_drop_nan.dropna(inplace=True)
-        
-onehot_is_series=OneHotEncoder(handle_unknown='ignore',sparse=False)
-onehot_is_series.fit(pd_film_series_drop_nan[['is_series']])
-all_films_id = pd.read_csv(opt.folder + "data/" + opt.path_film_series)['series_id'].apply(lambda x: str(x)).tolist()
-onehot_categorical=MultiLabelBinarizer()
-all_category = get_all_category(pd_film_series)
-onehot_categorical.fit([all_category])
     
-onehot_country=OneHotEncoder(handle_unknown='ignore',sparse=False)
-pd_film_series_country = pd.DataFrame(pd_film_series, columns = ['country'])
-pd_film_series_country = pd_film_series_country[pd_film_series_country['country'].notnull()]
-onehot_country.fit(pd_film_series_country[['country']])
-model_tokenizer= AutoTokenizer.from_pretrained("vinai/phobert-base")
-bertsentence= SentenceTransformer('VoVanPhuc/sup-SimCSE-VietNamese-phobert-base', device="cpu")
+def get_ft_item(film_id, data):
     
-def get_ft_item(film_id):
-    record_trg_item = get_record_by_item_id(film_id, pd_film_series)
-    duration = dict_films_duration[int(film_id)][0]
-    fe_record_trg_item = embedding_item(duration, record_trg_item, bertsentence,onehot_is_series,onehot_country,onehot_categorical,model_tokenizer)
-    return fe_record_trg_item
-
-def embedding_item(duration, record, bertsentence,onehot_is_series,onehot_country,onehot_categorical,bert_words):
-    data={}
-    
-    if type(record['description']) != str:
+    if data[str(film_id)] is None:
         return None
-    data['description']= normalizeString(str(record['series_name']) + " " + str(record['description']))
-        
-    data['country']=[record['country']]
-    try:
-        data['raw_category_name'] = record['raw_category_name'].split(",")
-    except: 
-        data['raw_category_name'] = ""
-               
-    data['director_name']=record['director_name']
-    
-    data['actor_name']=record['actor_name']
-    
-    data['is_series']=[record['is_series']]
-    
-    data['duration']= duration
-    
-    if np.isnan(record['release_year']):
-        # return None
-        data['release_year'] = 2022
-    else:        
-        data['release_year']=record['release_year']
-    
-    sentences=[tokenize(data['description'])]
-    
-    description_emb= torch.FloatTensor(bertsentence.encode(sentences))
-    
-    is_series_emb=onehot_is_series.transform([data['is_series']])
-    is_series_emb=torch.FloatTensor(is_series_emb)
-    
-    duration=torch.FloatTensor([[data['duration']]])
-    
-    release_year=torch.FloatTensor([[data['release_year']]])
-
-    if type(data['country']) == str:
-        country=onehot_country.transform([data['country']]) 
     else:
-        country=onehot_country.transform([[""]])               
-    country=torch.FloatTensor(country)
+        description_emb, country, category, actor, director, is_series_emb, duration ,release_year = data[str(film_id)]
     
-    category=onehot_categorical.transform([data['raw_category_name']])
-    category=torch.FloatTensor(category)
-    
-    if type(data['actor_name']) == str:
-        actor=[bert_words.encode(data['actor_name'])]
-    else:
-        actor=[bert_words.encode("")]                
-    actor=torch.FloatTensor(actor)
-    if actor.shape[1]<16:
-        actor=F.pad(actor,(1,15-actor.shape[1]),mode='constant', value=0)
-    elif actor.shape[1]>16:
-        actor=actor[:,:16]
-        
-    if type(data['director_name']) == str:      
-        director=[bert_words.encode(data['director_name'])]
-    else:
-        director=[bert_words.encode('')]
-                       
-    director=torch.FloatTensor(director)
-    if director.shape[1]<16:
-        director=F.pad(director,(1,15-director.shape[1]),mode='constant', value=0)
-    elif director.shape[1]>16:
-        director=director[:,:16]
-    return (normalize(description_emb).unsqueeze(0).to(args.device), normalize(country).unsqueeze(0).to(args.device), normalize(category).unsqueeze(0).to(args.device),normalize(actor).unsqueeze(0).to(args.device), normalize(director).unsqueeze(0).to(args.device), is_series_emb.unsqueeze(0).to(args.device), duration.unsqueeze(0).to(args.device),release_year.unsqueeze(0).to(args.device))
+        return (description_emb.unsqueeze(0).to(args.device), country.unsqueeze(0).to(args.device), category.unsqueeze(0).to(args.device),
+                actor.unsqueeze(0).to(args.device), director.unsqueeze(0).to(args.device), 
+                is_series_emb.unsqueeze(0).to(args.device), duration.unsqueeze(0).to(args.device),
+                release_year.unsqueeze(0).to(args.device)
+        )
     
 def get_ft_user(user_id):
     try:
@@ -191,7 +115,7 @@ def get_ft_user(user_id):
 
 def parse_opt(known=False):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', type=str, default='TV360/RCM/save_models/123_best_accuracy.pth', help='initial weights path')
+    parser.add_argument('--weights', type=str, default='TV360/RCM/80_best_accuracy.pth', help='initial weights path')
     parser.add_argument('--batch-size', type=int, default=1024, help='total batch size for all GPUs, -1 for autobatch')
     parser.add_argument('--device', default='cuda:0', help='cuda device, i.e. cuda:0 or 0,1,2,3 or cpu')
     parser.add_argument('--start-day', type=int, default=20220626, help='Date from 20220625 to 20220630')
@@ -233,8 +157,11 @@ if __name__ == "__main__":
     dict_fe_item = {}
     list_film_remove = []
     list_ft_film = []
+    raw_features_file = 'raw_features.pickle'
+    with open(raw_features_file, 'rb') as f:
+        data = pickle.load(f)
     for item_id in list_film_id:
-        dict_fe_item[item_id] = get_ft_item(item_id)
+        dict_fe_item[item_id] = get_ft_item(item_id, data)
         if dict_fe_item[item_id] is None:          
             list_film_remove.append(item_id)    
     
