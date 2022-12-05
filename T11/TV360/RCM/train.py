@@ -10,9 +10,9 @@ import torchvision
 from torchvision import models, transforms
 import torch.nn.functional as F
 from tqdm import tqdm
-import new_model
-from new_model import TV360Recommend
-from new_dataloader1 import split_data, Tv360Dataset 
+import model
+from model import TV360Recommend
+from dataloader import split_data, Tv360Dataset 
 import os
 # torch.multiprocessing.set_start_method('spawn')
 from multiprocessing import set_start_method
