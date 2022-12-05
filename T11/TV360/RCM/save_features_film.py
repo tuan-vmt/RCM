@@ -28,6 +28,23 @@ import csv
 import pickle
 from underthesea import text_normalize
 
+def process_actor_director(x):
+    if type(x) != str:
+        return ["other"]
+    else:
+        if len(x)==0:
+            return ["other"]
+        return x.split(",")
+
+def check_list(list_x, all_x):
+    new_list = []
+    for x in list_x[0]:
+        if x in all_x:
+            new_list.append(x)
+        else:
+            new_list.append("other")    
+    return [new_list]
+
 def normalizeString(s):
     # Tách dấu câu nếu kí tự liền nhau
     s = re.sub(r"([.!?,\-\&\(\)\[\]])", r" \1 ", s)
@@ -55,6 +72,67 @@ def get_all_category(pd_film_series):
 
 pd_film_series = pd.read_csv(opt.folder + "data/"  + opt.path_film_series)
 pd_film_episode = pd.read_csv(opt.folder + "data/"  + opt.path_film_episode)
+
+#Onehot Actor-2237, 1067
+pd_film_series['actor_id'] = pd_film_series['actor_id'].apply(lambda x: process_actor_director(x))
+list_actor = pd_film_series['actor_id'].tolist()
+dict_film_actor = pd_film_series[['series_id', 'actor_id']].set_index('series_id').T.to_dict('list')
+unique_list_actor = []
+for x in list_actor:
+    unique_list_actor.extend(x)
+unique_list_actor = list(set(unique_list_actor))
+list_numbers_of_actor = {}
+
+for actor_id in unique_list_actor:
+    for list_actor_id in list_actor:
+        if actor_id in list_actor_id:
+            if list_numbers_of_actor.get(actor_id) is None:
+                list_numbers_of_actor[actor_id] = 1
+            else:
+                list_numbers_of_actor[actor_id] +=1
+
+filter_actor = []
+for actor_id in list_numbers_of_actor.keys():
+    if list_numbers_of_actor[actor_id] > 1:
+        print(actor_id)
+        filter_actor.append(actor_id)
+    else:
+        filter_actor.append("other")
+filter_actor = list(set(filter_actor))
+filter_actor.sort()            
+onehot_actor=MultiLabelBinarizer()
+onehot_actor.fit([filter_actor])
+
+#Onehot director-444
+pd_film_series['director_id'] = pd_film_series['director_id'].apply(lambda x: process_actor_director(x))
+list_director = pd_film_series['director_id'].tolist()
+dict_film_director = pd_film_series[['series_id', 'director_id']].set_index('series_id').T.to_dict('list')
+unique_list_director = []
+for x in list_director:
+    unique_list_director.extend(x)
+unique_list_director = list(set(unique_list_director))
+list_numbers_of_director = {}
+
+for director_id in unique_list_director:
+    for list_director_id in list_director:
+        if director_id in list_director_id:
+            if list_numbers_of_director.get(director_id) is None:
+                list_numbers_of_director[director_id] = 1
+            else:
+                list_numbers_of_director[director_id] +=1
+
+filter_director = []
+for director_id in list_numbers_of_director.keys():
+    if list_numbers_of_director[director_id] > 1:
+        print(director_id)
+        filter_director.append(director_id)
+    else:
+        filter_director.append("other")
+filter_director = list(set(filter_director))
+filter_director.sort()            
+onehot_director=MultiLabelBinarizer()
+onehot_director.fit([filter_director])
+
 dict_films_duration = pd_film_episode.groupby('series_id')['duration'].agg([("duration", "sum")]).reset_index().set_index('series_id').T.to_dict('list')
 ccai = pd.read_csv(opt.folder + opt.path_file_user_info)
 ccai_drop_nan = pd.read_csv(opt.folder + opt.path_file_user_info)
@@ -83,15 +161,19 @@ def get_record_by_item_id(item_id, pd_film_series):
 def get_ft_item(film_id):
     record_trg_item = get_record_by_item_id(film_id, pd_film_series)
     duration = dict_films_duration[int(film_id)][0]
-    fe_record_trg_item = embedding_item(duration, record_trg_item, bertsentence,onehot_is_series,onehot_country,onehot_categorical,model_tokenizer)
+    fe_record_trg_item = embedding_item(film_id, duration, record_trg_item, bertsentence,onehot_is_series,onehot_country,onehot_categorical)
     return fe_record_trg_item
 
-def embedding_item(duration, record, bertsentence,onehot_is_series,onehot_country,onehot_categorical,bert_words):
+def embedding_item(film_id, duration, record, bertsentence,onehot_is_series,onehot_country,onehot_categorical):
     data={}
     
     if type(record['description']) != str:
-        return None
-    data['description']= normalizeString(str(record['series_name']) + " " + str(record['description']))
+        if type(record['series_name']) != str:
+            data['description'] = "other"
+        else:
+            data['description'] = normalizeString(str(record['series_name']))
+    else:           
+        data['description']= normalizeString(str(record['series_name']) + " " + str(record['description']))
         
     data['country']=[record['country']]
     try:
@@ -133,29 +215,24 @@ def embedding_item(duration, record, bertsentence,onehot_is_series,onehot_countr
     category=onehot_categorical.transform([data['raw_category_name']])
     category=torch.FloatTensor(category)
     
-    if type(data['actor_name']) == str:
-        actor=[bert_words.encode(data['actor_name'])]
-    else:
-        actor=[bert_words.encode("")]                
-    actor=torch.FloatTensor(actor)
-    if actor.shape[1]<16:
-        actor=F.pad(actor,(1,15-actor.shape[1]),mode='constant', value=0)
-    elif actor.shape[1]>16:
-        actor=actor[:,:16]
-        
-    if type(data['director_name']) == str:      
-        director=[bert_words.encode(data['director_name'])]
-    else:
-        director=[bert_words.encode('')]
-                       
-    director=torch.FloatTensor(director)
-    if director.shape[1]<16:
-        director=F.pad(director,(1,15-director.shape[1]),mode='constant', value=0)
-    elif director.shape[1]>16:
-        director=director[:,:16]
-    # emb_film = torch.concat([description_emb), country), category),actor), director), is_series_emb, duration,release_year], 1)
+    #Actor
+    actor = onehot_actor.transform(check_list(dict_film_actor[int(film_id)], filter_actor))
+    actor = torch.FloatTensor(actor)
+    
+    #Director
+    director = onehot_director.transform(check_list(dict_film_director[int(film_id)], filter_director))
+    director = torch.FloatTensor(director)
+    
+    # print(dict_film_actor[int(film_id)])
+    # print(dict_film_director[int(film_id)])
+    # print(actor.size())
+    # print(director.size())
+    # emb_film = torch.concat([description_emb, country, category,actor, director, is_series_emb, duration,release_year], 1)
     # print(emb_film.size())
     # return emb_film.detach().cpu().numpy()[0]
+    # return (normalize(description_emb).to(opt.device), normalize(country).to(opt.device), normalize(category).to(opt.device),normalize(actor).to(opt.device), 
+    #         normalize(director).to(opt.device), normalize(is_series_emb).to(opt.device),normalize(duration).to(opt.device), normalize(release_year).to(opt.device))
+    
     return (description_emb.to(opt.device), country.to(opt.device), category.to(opt.device),actor.to(opt.device), 
             director.to(opt.device), is_series_emb.to(opt.device),duration.to(opt.device), release_year.to(opt.device))
     

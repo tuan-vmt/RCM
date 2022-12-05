@@ -30,6 +30,8 @@ from transformers import AutoModel, AutoTokenizer
 from scipy import sparse
 import bottleneck as bn
 import pickle5 as pickle
+from copy import deepcopy
+from pytorch_model_summary import summary
 
 def ndcg(X_pred, heldout_batch, k=50):
     '''
@@ -83,7 +85,6 @@ def get_ft_item(film_id, data):
         return None
     else:
         description_emb, country, category, actor, director, is_series_emb, duration ,release_year = data[str(film_id)]
-    
         return (description_emb.unsqueeze(0).to(args.device), country.unsqueeze(0).to(args.device), category.unsqueeze(0).to(args.device),
                 actor.unsqueeze(0).to(args.device), director.unsqueeze(0).to(args.device), 
                 is_series_emb.unsqueeze(0).to(args.device), duration.unsqueeze(0).to(args.device),
@@ -115,7 +116,8 @@ def get_ft_user(user_id):
 
 def parse_opt(known=False):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--weights', type=str, default='TV360/RCM/80_best_accuracy.pth', help='initial weights path')
+    parser.add_argument('--weights', type=str, default='TV360/RCM/save_models_2237/85_best_accuracy.pth', help='initial weights path')
+    parser.add_argument('--mask', action='store_true', help='Che nhung film trong history film cua user')
     parser.add_argument('--batch-size', type=int, default=1024, help='total batch size for all GPUs, -1 for autobatch')
     parser.add_argument('--device', default='cuda:0', help='cuda device, i.e. cuda:0 or 0,1,2,3 or cpu')
     parser.add_argument('--start-day', type=int, default=20220626, help='Date from 20220625 to 20220630')
@@ -132,6 +134,8 @@ if __name__ == "__main__":
         exit()
         
     list_film_id = pd_film_series['series_id'].apply(lambda x: str(x)).tolist()
+    dict_film_durations = pd_film_series[["series_id", "duration"]]
+    dict_film_durations = dict_film_durations.set_index('series_id').T.to_dict('list')
     path_file_user_info = opt.path_file_user_info
     folder = opt.folder
     path_list_file_log_film = []
@@ -153,11 +157,10 @@ if __name__ == "__main__":
     model = TV360Recommend().to(args.device)
     model.load_state_dict(torch.load(args.weights))
     model.eval()
-    
     dict_fe_item = {}
     list_film_remove = []
     list_ft_film = []
-    raw_features_file = 'raw_features.pickle'
+    raw_features_file = 'raw_features_unnormal.pickle'
     with open(raw_features_file, 'rb') as f:
         data = pickle.load(f)
     for item_id in list_film_id:
@@ -201,8 +204,8 @@ if __name__ == "__main__":
     hst_users_info = hst_users_info[hst_users_info['content_id'].isin(list_film_id)]
     hst_users_info = hst_users_info[(hst_users_info['content_id'] != "-1") & (hst_users_info['user_id'] != "-1")]
     hst_film_id_group_by_user = hst_users_info.groupby(["user_id", "content_id"])['watch_duration'].agg([("watch_duration", "sum")]).reset_index()
-    # hst_film_id_group_by_user['partition'] = hst_users_info.groupby(["user_id", "content_id"])['partition'].apply(lambda x: min(x)).reset_index()['partition']
-    hst_film_id_group_by_user['partition'] = hst_users_info.groupby(["user_id", "content_id"])['partition'].apply(list).reset_index()['partition']
+    hst_film_id_group_by_user['partition'] = hst_users_info.groupby(["user_id", "content_id"])['partition'].apply(lambda x: max(x)).reset_index()['partition']
+    # hst_film_id_group_by_user['partition'] = hst_users_info.groupby(["user_id", "content_id"])['partition'].apply(list).reset_index()['partition']
     users_items = hst_film_id_group_by_user.groupby(['user_id'])['content_id'].apply(list).apply(lambda x: x if len(x) > 0 else -1).reset_index()
     # users_items = hst_film_id_group_by_user.groupby(['user_id'])['content_id'].apply(list).apply(lambda x: x if len(x) >= opt.numbers_of_hst_films else -1).reset_index()
     #apply(lambda x: x if len(x) >= opt.numbers_of_hst_films else -1)
@@ -211,32 +214,54 @@ if __name__ == "__main__":
     users_items = users_items[users_items['content_id'] != -1]
     # print(users_items)
     users_items = users_items.set_index('user_id').T.to_dict('list')
-            
-    # def sort_date(value):
-    #     v = list(zip(value[0], value[1], value[2]))
-    #     v.sort(key=lambda x: x[1])
-    #     # print(list(zip(value[0], value[1], value[2])).sort(key=lambda x: x[1]))
-    #     if len(v) < opt.numbers_of_hst_films:
-    #         v.extend((opt.numbers_of_hst_films - len(v)) * [v[-1]])
-    #     return v[-opt.numbers_of_hst_films:]
-    # hst_users_items = {k: sort_date(v) for k, v in users_items.items()}
     
-    def sort_date(value):
-        # v = list(zip(value[0], value[1], value[2]))
-        # v.sort(key=lambda x: x[1])
-        # # print(list(zip(value[0], value[1], value[2])).sort(key=lambda x: x[1]))
-        # return v
-        v = []
-        for film_id, list_date, watch_duration in zip(value[0], value[1], value[2]):
-            list_date = list(set(list_date))
-            len_date = len(list_date)            
-            v.extend(list(zip(len_date*[film_id], list_date, len_date*[watch_duration])))
+    dict_mask_index_film_user = {}        
+    def sort_date(key, value):
+        v = list(zip(value[0], value[1], value[2]))
         v.sort(key=lambda x: x[1])
+        # print(list(zip(value[0], value[1], value[2])).sort(key=lambda x: x[1]))
         if len(v) < opt.numbers_of_hst_films:
             v.extend((opt.numbers_of_hst_films - len(v)) * [v[-1]])
-        return v[-opt.numbers_of_hst_films:]       
+        
+        dict_mask_index_film_user[key] = []
+        list_film_remove = []
+        if args.mask:
+            ground_truth = eval_users_info[key][0]
+            for item in v:
+                if item[0] in ground_truth:
+                    if item[0] in list_film_remove:
+                        continue
+                    else:
+                        list_film_remove.append(item[0])
+                        index_list_film = list_film_id.index(item[0])
+                        dict_mask_index_film_user[key].append(index_list_film)
+            for item_id in list_film_remove:
+                eval_users_info[key][0].remove(item_id)
+            # print(dict_mask_index_film_user[key])            
+            # print(list_film_remove)
+            # print(eval_users_info[key][0])
+            # print("------------------")    
+            # if '8167' in list_film_remove:
+            #     exit()
+                        
+        return v[-opt.numbers_of_hst_films:]
+    hst_users_items = {k: sort_date(k, v) for k, v in users_items.items()}
+    # def sort_date(value):
+    #     # v = list(zip(value[0], value[1], value[2]))
+    #     # v.sort(key=lambda x: x[1])
+    #     # # print(list(zip(value[0], value[1], value[2])).sort(key=lambda x: x[1]))
+    #     # return v
+    #     v = []
+    #     for film_id, list_date, watch_duration in zip(value[0], value[1], value[2]):
+    #         list_date = list(set(list_date))
+    #         len_date = len(list_date)            
+    #         v.extend(list(zip(len_date*[film_id], list_date, len_date*[watch_duration])))
+    #     v.sort(key=lambda x: x[1])
+    #     if len(v) < opt.numbers_of_hst_films:
+    #         v.extend((opt.numbers_of_hst_films - len(v)) * [v[-1]])
+    #     return v[-opt.numbers_of_hst_films:]       
     
-    hst_users_items = {k: sort_date(v) for k, v in users_items.items()} 
+    # hst_users_items = {k: sort_date(v) for k, v in users_items.items()} 
            
     onehot_film = MultiLabelBinarizer()
     onehot_film.fit([list_film_id])        
@@ -245,19 +270,15 @@ if __name__ == "__main__":
     # print(hst_users_items)
     print("Length User: ", len(list(hst_users_items.keys())))       
     with torch.no_grad():   
-        for i, key in enumerate(hst_users_items.keys()):
+        for idx, key in enumerate(hst_users_items.keys()):
             # print(i)
-            if i > 200:
+            if idx > 200:
                 break
             # print(eval_users_info[key])
-            if len(eval_users_info[key]) == 0:
-                print("Empty Film Item")
+            if len(eval_users_info[key][0]) == 0:
+                # print("Empty Film Item")
                 continue
             heldout_batch_key = onehot_film.transform(eval_users_info[key])[0]
-            if 1 not in heldout_batch_key:
-                print(key)
-                print(eval_users_info[key])
-                exit()
             pred_key = []
             hst_films_key = hst_users_items[key]
             ccai_embedding = get_ft_user(key)
@@ -273,17 +294,16 @@ if __name__ == "__main__":
                 for i in range(8):
                     ft_i = torch.cat(args.batch_size*[fe_item[i]], 0)
                     batch_fe_item.append(ft_i)
-                # rating = min(float(watch_duration)/float(dict_films_duration[int(film_id)][0]), 1)
-                
-                # prefer = float(watch_duration)/float(dict_films_duration[int(film_id)][0])
-                # if prefer > opt.prefer_threshold:
-                #     rating = 1
-                # else:
-                #     rating = prefer/opt.prefer_threshold
+                    
                 if watch_duration > opt.duration_threshold:
                     rating = 1
                 else:
-                    rating = watch_duration/opt.duration_threshold  
+                    rating = watch_duration/opt.duration_threshold
+                # if watch_duration > dict_film_durations[int(film_id)][0]:
+                #     rating = 1
+                # else:
+                #     rating = watch_duration/dict_film_durations[int(film_id)][0]
+                # print(rating)      
                 rating = torch.cat(args.batch_size*[torch.tensor([rating])], 0)
                 
                 list_rating.append(rating)
@@ -292,6 +312,8 @@ if __name__ == "__main__":
             nb_batch = (length_list_ft_film // args.batch_size) + 1
             pred_user = []
             for i in range(nb_batch):
+                fe_hst_items1 = deepcopy(fe_hst_items)
+                list_rating1 = deepcopy(list_rating)
                 z = min(args.batch_size*(i+1), length_list_ft_film)
                 len_batch = z - args.batch_size*i
                 batch_ft_film = []
@@ -299,15 +321,20 @@ if __name__ == "__main__":
                     batch_ft_film.append(list_ft_film[i1][args.batch_size*i: z])
                 if len_batch < args.batch_size:
                     for i2 in range(len(hst_films_key)): 
-                        list_rating[i2] = list_rating[i2][:len_batch] 
-                        for i3 in range(len(fe_hst_items[i2])):
-                            fe_hst_items[i2][i3] = fe_hst_items[i2][i3][:len_batch]   
+                        list_rating1[i2] = list_rating[i2][:len_batch] 
+                        for i3 in range(len(fe_hst_items1[i2])):
+                            fe_hst_items1[i2][i3] = fe_hst_items1[i2][i3][:len_batch]   
                 
-                inputs = (fe_hst_items, batch_ft_film, ccai_embedding[:len_batch], list_rating)
+                inputs = (fe_hst_items1, batch_ft_film, ccai_embedding[:len_batch], list_rating1)
+                # print(summary(model, inputs))
+                # exit()
                 outputs = model(inputs)
                 outputs = outputs[:, 0].detach().cpu().numpy()
                 pred_user.extend(outputs)
-            # pred_key.append(outputs[:, 0].detach().cpu().numpy())   
+            # pred_key.append(outputs[:, 0].detach().cpu().numpy())
+            if args.mask:
+                for index in dict_mask_index_film_user[key]:
+                    pred_user[index] = 0      
             pred.append(pred_user)
             
     pred = np.array(pred)

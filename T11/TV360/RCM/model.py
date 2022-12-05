@@ -9,17 +9,27 @@ class TabTransformer(nn.Module):
     def __init__(self):
         super().__init__()
         self.linear1 = nn.Linear(768, 64)
-        self.linear2 = nn.Linear(132, 32)
+        self.linear2 = nn.Linear(128, 32)
         self.linear3 = nn.Linear(36, 16)
         self.linear4 = nn.Linear(39, 16)
+        self.linear5 = nn.Sequential(nn.Linear(2237, 512), nn.Linear(512, 128), nn.Linear(128, 16))
+        # self.linear5 = nn.Sequential(nn.Linear(1067, 128), nn.Linear(128, 16))
+        self.linear6 = nn.Sequential(nn.Linear(444, 128), nn.Linear(128, 16))
         self.n = 6  # Number of Attention Layer
         self.transformer = nn.TransformerEncoder(nn.TransformerEncoderLayer(d_model=16, nhead=8, batch_first=True,
                                                                             activation=nn.LeakyReLU(0.1),
-                                                                            dropout=0.3), self.n)
+                                                                            ), self.n)
 
     def forward(self, x):
         # Descriptions Embedding
-        
+        # print(x[0].size())
+        # print(x[1].size())
+        # print(x[2].size())
+        # print(x[3].size())
+        # print(x[4].size())
+        # print(x[5].size())
+        # print(x[6].size())
+        # print(x[7].size())
         fe_descriptions = self.linear1(x[0]).reshape(-1, 1, 64)
         
         # Country Embedding
@@ -28,6 +38,8 @@ class TabTransformer(nn.Module):
         # Category Embedding
         fe_categories = self.linear4(x[2])
         
+        x[3] = self.linear5(x[3])
+        x[4] = self.linear6(x[4])
         fe_info_film = torch.cat((fe_country, fe_categories, x[3], x[4]), 1)
         
         # Self Attention
@@ -38,7 +50,7 @@ class TabTransformer(nn.Module):
         fe_info_film_2 = torch.cat((x[5], x[6], x[7]), 2)
         # print(ebd_info2.size())
         
-        fe_item_ebd = torch.cat((fe_descriptions, fe_info_film_1, fe_info_film_2), 2)
+        fe_item_ebd = torch.cat((fe_descriptions, fe_info_film_1), 2)
                
         fe_item_ebd = self.linear2(fe_item_ebd)
         
@@ -86,8 +98,8 @@ class TransformerLayer(nn.Module):
         self.d_model = 32
         self.transformer = nn.TransformerEncoder(nn.TransformerEncoderLayer(d_model=self.d_model, nhead=8,
                                                                             batch_first=True,
-                                                                            activation=nn.LeakyReLU(0.1),
-                                                                            dropout=0.3), self.n).to(opt.device)
+                                                                            activation=nn.LeakyReLU(0.1)
+                                                                            ), self.n).to(opt.device)
         self.inplanes = opt.numbers_of_hst_films
         self.pe = PositionalEncoder(d_model=self.d_model, max_seq_length=opt.numbers_of_hst_films+1, dropout=0.1)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, 32))
@@ -136,7 +148,7 @@ class TV360Recommend(nn.Module):
         super().__init__()
         self.TabTransformerTargetItem = TabTransformer().to(opt.device)
         self.TransformerLayer = TransformerLayer().to(opt.device)
-        self.linear_pairwise = nn.Linear(opt.numbers_of_hst_films, 1)
+        self.linear_pairwise = nn.Linear(64, 1).to(opt.device)
         self.deep_model = DeepModel().to(opt.device)
         self.fc = nn.Linear(2, 1).to(opt.device)
     
@@ -159,8 +171,10 @@ class TV360Recommend(nn.Module):
         # Wide & Deep Model
         
         # Wide Model
-        fe_pairwise = torch.nn.CosineSimilarity(dim=2)(fe_user_prefer.unsqueeze(1), fe_target_item)
+        # fe_pairwise = torch.nn.CosineSimilarity(dim=2)(fe_user_prefer.unsqueeze(1), fe_target_item)
 
+        fe_pairwise = torch.flatten(torch.cat((fe_user_prefer.unsqueeze(1),fe_target_item), 1), 1)
+        fe_pairwise = self.linear_pairwise(fe_pairwise)
         # Deep Model
         fe_deep = self.deep_model(fe_user_prefer, fe_target_item, ccai_embedding)
         

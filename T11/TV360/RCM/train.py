@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 import new_model
 from new_model import TV360Recommend
-from dataloader import split_data, Tv360Dataset 
+from new_dataloader1 import split_data, Tv360Dataset 
 import os
 # torch.multiprocessing.set_start_method('spawn')
 from multiprocessing import set_start_method
@@ -35,7 +35,7 @@ def collate_fn(batch):
 def parse_opt(known=False):
     parser = argparse.ArgumentParser()
     parser.add_argument('--pretrained', action='store_true', help='Load Pretrained Model')
-    parser.add_argument('--weights', type=str, default='best.pt', help='initial weights path')
+    parser.add_argument('--weights', type=str, default='TV360/RCM/best_checkpoint/best/278_best_accuracy.pth', help='initial weights path')
     parser.add_argument('--epochs', type=int, default=300)
     parser.add_argument('--batch-size', type=int, default=1024, help='total batch size for all GPUs, -1 for autobatch')
     parser.add_argument('--device', type=str, default='cuda:0', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
@@ -51,11 +51,11 @@ if __name__ == "__main__":
     max = 10
     print(args.device)
     #Split Data Train, Val and Test
-    hst_users_items, target_users_items = split_data() 
+    target_users_items = split_data() 
     #Load Dataset  
     
-    train_dataset = Tv360Dataset(hst_users_items, target_users_items, phase="train")
-    val_dataset = Tv360Dataset(hst_users_items, target_users_items, phase="val")
+    train_dataset = Tv360Dataset(target_users_items, phase="train")
+    val_dataset = Tv360Dataset(target_users_items, phase="val")
     train_dataloader = torch.utils.data.DataLoader(train_dataset, args.batch_size, collate_fn=collate_fn, shuffle=True)
     val_dataloader = torch.utils.data.DataLoader(val_dataset, args.batch_size, collate_fn=collate_fn, shuffle=False)
     
@@ -71,7 +71,7 @@ if __name__ == "__main__":
     criterior = nn.BCELoss()
     
     for epoch in range(args.epochs):
-        print("Epoch {}/{}".format(epoch, args.epochs))
+        print("Epoch {}/{}".format(epoch+1, args.epochs))
         epoch_loss = 0.0
         # epoch_corrects = 0
         # Training

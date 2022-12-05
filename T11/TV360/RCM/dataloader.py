@@ -19,6 +19,7 @@ from sklearn.preprocessing import LabelEncoder
 from transformers import AutoModel, AutoTokenizer
 from torch.nn.functional import normalize
 import pickle5 as pickle
+import random
 
 all_films_id = pd.read_csv(opt.folder + "data/" + opt.path_film_series)['series_id'].apply(lambda x: str(x)).tolist()
 all_episode_id = pd.read_csv(opt.folder + "data/" + opt.path_film_episode)
@@ -113,34 +114,39 @@ def split_data():
     # filter_list_user = list(users_items.keys())
 
     # Split History, Train & Val Users-Item
-    hst_users_items = {}
-    hst_users_items['train'] = {}
-    hst_users_items['val'] = {}
     train_target_users_items = []
     val_target_users_items = []
     list_target_users_item = []
+    
+    for key in users_items.keys():
+        list_hst_key = users_items[key][:opt.numbers_of_hst_films]
+        for idx in range(opt.numbers_of_hst_films, len(users_items[key])):
+            label = 1 if (users_items[key][idx][2] > opt.duration_threshold) else 0
+            list_target_users_item.append((key, list_hst_key, users_items[key][idx], label))
+                   
     for key in users_items.keys():
         # hst_users_items[key] = users_items[key][:opt.numbers_of_hst_films]
-        for idx, item in enumerate(users_items[key]):
+        for idx in range(len(users_items[key])):
             # print(item)
             # print(type(item))
-            if idx < opt.numbers_of_hst_films:
-                if hst_users_items['train'].get(key) is None:
-                    hst_users_items['train'][key] = []
-                    hst_users_items['train'][key].append((item[0],item[1],item[2]))
-                else:
-                    hst_users_items['train'][key].append((item[0],item[1],item[2]))        
+            if idx == len(users_items[key]) - 1:
+                continue
             else:
-                list_target_users_item.append((key, item[0],item[1],item[2]))
-            
-            if idx <  (int(0.7*(len(users_items[key]) - opt.numbers_of_hst_films)) + opt.numbers_of_hst_films) and idx >= int(0.7*(len(users_items[key]) - opt.numbers_of_hst_films)):
-                if hst_users_items['val'].get(key) is None:
-                    hst_users_items['val'][key] = []
-                    hst_users_items['val'][key].append((item[0],item[1],item[2]))
+                if idx + opt.numbers_of_hst_films <= len(users_items[key]) - 1:
+                    list_hst_key = users_items[key][idx:(idx + opt.numbers_of_hst_films)]
+                    target_item = users_items[key][idx + opt.numbers_of_hst_films]
+                    label = 1 if (target_item[2] > opt.duration_threshold) else 0
+                    list_target_users_item.append((key, list_hst_key, target_item, label))
                 else:
-                    hst_users_items['val'][key].append((item[0],item[1],item[2]))
-                
-
+                    length_hst = len(users_items[key]) - 1 - idx
+                    list_hst_key =  users_items[key][idx:(idx + length_hst)]
+                    list_hst_key.extend((opt.numbers_of_hst_films - length_hst) * [users_items[key][-1]])
+                    target_item = users_items[key][-1]
+                    label = 1 if (target_item[2] > opt.duration_threshold) else 0
+                    list_target_users_item.append((key, list_hst_key, target_item, label))
+                    
+    random.shuffle(list_target_users_item)
+                    
     length_train_trg_users_items = int(0.7 * (len(list_target_users_item)))
     list_train_trg_users_items = list_target_users_item[:length_train_trg_users_items]
     list_val_trg_users_items = list_target_users_item[length_train_trg_users_items:]
@@ -154,83 +160,7 @@ def split_data():
     # print(target_users_items)
     # print(hst_users_items)
     print("Done")
-    return hst_users_items, target_users_items
-
-
-def embedding_dataloader(duration, record, bertsentence, onehot_is_series, onehot_country, onehot_categorical,
-                         bert_words):
-    data = {}
-
-    if type(record['description']) != str:
-        return None
-    data['description'] = normalizeString(str(record['series_name']) + " " + str(record['description']))
-
-    data['country'] = [record['country']]
-    try:
-        data['raw_category_name'] = record['raw_category_name'].split(",")
-    except:
-        data['raw_category_name'] = ""
-
-    data['director_name'] = record['director_name']
-
-    data['actor_name'] = record['actor_name']
-
-    data['is_series'] = [record['is_series']]
-
-    data['duration'] = duration
-
-    if np.isnan(record['release_year']):
-        return None
-        # data['release_year'] = 2022
-    else:
-        data['release_year'] = record['release_year']
-
-    sentences = [tokenize(data['description'])]
-
-    description_emb = torch.FloatTensor(bertsentence.encode(sentences))
-
-    is_series_emb = onehot_is_series.transform([data['is_series']])
-    is_series_emb = torch.FloatTensor(is_series_emb)
-
-    duration = torch.FloatTensor([[data['duration']]])
-
-    release_year = torch.FloatTensor([[data['release_year']]])
-
-    if type(data['country']) == str:
-        country = onehot_country.transform([data['country']])
-    else:
-        country = onehot_country.transform([[""]])
-    country = torch.FloatTensor(country)
-
-    category = onehot_categorical.transform([data['raw_category_name']])
-    category = torch.FloatTensor(category)
-
-    if type(data['actor_name']) == str:
-        actor = [bert_words.encode(data['actor_name'])]
-    else:
-        actor = [bert_words.encode("")]
-    actor = torch.FloatTensor(actor)
-    if actor.shape[1] < 16:
-        actor = F.pad(actor, (1, 15 - actor.shape[1]), mode='constant', value=0)
-    elif actor.shape[1] > 16:
-        actor = actor[:, :16]
-
-    if type(data['director_name']) == str:
-        director = [bert_words.encode(data['director_name'])]
-    else:
-        director = [bert_words.encode('')]
-
-    director = torch.FloatTensor(director)
-    if director.shape[1] < 16:
-        director = F.pad(director, (1, 15 - director.shape[1]), mode='constant', value=0)
-    elif director.shape[1] > 16:
-        director = director[:, :16]
-
-    return (
-    normalize(description_emb).to(opt.device), normalize(country).to(opt.device), normalize(category).to(opt.device),
-    normalize(actor).to(opt.device), normalize(director).to(opt.device), is_series_emb.to(opt.device),
-    duration.to(opt.device), release_year.to(opt.device))
-
+    return target_users_items
 
 def get_unique_category(pd_film):
     list_category_unique = []
@@ -257,16 +187,16 @@ def get_record_by_item_id(item_id, pd_film_series):
 
 
 class Tv360Dataset(data.Dataset):
-    def __init__(self, hst_users_items, target_users_items, phase="train"):
-        self.hst_users_items = hst_users_items[phase]
+    def __init__(self, target_users_items, phase="train"):
         self.ccai = pd.read_csv(opt.folder + opt.path_file_user_info)
         self.ccai_drop_nan = pd.read_csv(opt.folder + opt.path_file_user_info)
         self.ccai_drop_nan.dropna(inplace=True)
-        self.org_target_users_items = target_users_items[phase]
-        self.target_users_items = []
-        self.labels = []
+        self.target_users_items = target_users_items[phase]
+        self.labels = [it[3] for it in self.target_users_items]
         # self.rating_imdb_rating = {}
         self.pd_film_series = pd.read_csv(opt.folder + "data/" + opt.path_film_series)
+        dict_film_durations = self.pd_film_series[["series_id", "duration"]]
+        self.dict_film_durations = dict_film_durations.set_index('series_id').T.to_dict('list')
         self.pd_film_series_drop_nan = pd.read_csv(opt.folder + "data/" + opt.path_film_series)
         self.pd_film_series_drop_nan.dropna(inplace=True)
         # print(self.pd_film_series['series_id'])
@@ -274,26 +204,8 @@ class Tv360Dataset(data.Dataset):
         self.list_ft_item = {}
         self.onehot_province_user = OneHotEncoder(handle_unknown='ignore', sparse=False)
         self.onehot_province_user.fit(self.ccai_drop_nan[['province_name']])
-        for i, (user_id, item_id, dates, watch_duration) in enumerate(self.org_target_users_items):
-            if int(item_id) in list(self.pd_film_series['series_id']):              
-                # duration = dict_films_duration[int(item_id)][0]
-                # if duration == 0:
-                #     continue
-                
-                # prefer = float(watch_duration) / float(duration)
-                # if prefer > opt.prefer_threshold:
-                #     self.labels.append(1)
-                # else:
-                #     self.labels.append(prefer/opt.prefer_threshold)              
-                # self.labels.append(min(float(watch_duration) / float(duration), 1))
-                # self.labels.append(float(watch_duration)/float(duration))
-                if watch_duration >= 300:
-                    self.labels.append(1)
-                else:
-                    self.labels.append(0)        
-                self.target_users_items.append((user_id, item_id, dates, watch_duration))
 
-        raw_features_file = 'raw_features.pickle'
+        raw_features_file = 'raw_features_unnormal.pickle'
         with open(raw_features_file, 'rb') as f:
             self.data = pickle.load(f)
         
@@ -304,8 +216,9 @@ class Tv360Dataset(data.Dataset):
         return len(self.labels)
 
     def __getitem__(self, idx):
-        user_id, item_id, _, _ = self.target_users_items[idx]
-        list_hst_item_id = self.hst_users_items[user_id]
+        # key, list_hst_key, target_item, label
+        user_id, list_hst_item_id, target_item, label = self.target_users_items[idx]
+        item_id = target_item[0]
         list_rating = []
         # CCAI Embedding
         if self.list_ft_user.get(int(user_id)) is not None:
@@ -340,20 +253,13 @@ class Tv360Dataset(data.Dataset):
                 rating = 1
             else:
                 rating = float(total_watch_duration) / opt.duration_threshold
+            # if total_watch_duration >= self.dict_film_durations[int(item_hst_id)][0]:
+            #     rating = 1
+            # else:
+            #     rating = float(total_watch_duration) / self.dict_film_durations[int(item_hst_id)][0]
             # rating = float(total_watch_duration) / opt.duration_threshold    
             # rating = min(float(total_watch_duration) / float(duration), 1)
             list_rating.append(rating)
-            # try:
-            #     hst_record_item = get_record_by_item_id(item_hst_id, self.pd_film_series)
-            # except:
-            #     return None
-            # if self.list_ft_item.get(int(item_hst_id)) is not None:
-            #     ebd = self.list_ft_item[int(item_hst_id)]
-            # else:
-            #     duration = dict_films_duration[int(item_hst_id)][0] 
-            #     ebd = embedding_dataloader(duration, hst_record_item, self.bertsentence, self.onehot_is_series,
-            #                            self.onehot_country, self.onehot_categorical, model_tokenizer)
-            #     self.list_ft_item[int(item_hst_id)] = ebd
             ebd = self.data[item_hst_id]
             if ebd is None:
                 return None
