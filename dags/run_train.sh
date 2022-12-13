@@ -1,0 +1,1 @@
+python3 /home/admin1/mnt_raid/source/tuanvm/AirFlow/airflow-tutorial/TV360/RCM/train.py --weights ${1} --epochs ${2} --batch-size ${3} --device ${4} --output-dir ${5}

@@ -1,0 +1,1 @@
+python3 /home/admin1/mnt_raid/source/tuanvm/AirFlow/airflow-tutorial/TV360/RCM/eval.py --weights ${1} --batch-size ${2} --device ${3} --start-day ${4} --end-day ${5}
