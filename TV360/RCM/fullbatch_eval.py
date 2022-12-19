@@ -113,13 +113,14 @@ def get_ft_user(user_id):
         return None              
     ccai_embedding = np.hstack((np.array([gender, age]), onehot_province_user))
     ccai_embedding = torch.FloatTensor(ccai_embedding)
+    # print(ccai_embedding.size())
     return ccai_embedding
 
 def parse_opt(known=False):
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str, default='TV360/RCM/save_models/85_best_accuracy.pth', help='initial weights path')
     parser.add_argument('--mask', action='store_true', help='Che nhung film trong history film cua user')
-    parser.add_argument('--batch-size', type=int, default=1024, help='total batch size for all GPUs, -1 for autobatch')
+    parser.add_argument('--batch-size', type=int, default=3, help='total batch size for all GPUs, -1 for autobatch')
     parser.add_argument('--device', default='cuda:0', help='cuda device, i.e. cuda:0 or 0,1,2,3 or cpu')
     parser.add_argument('--start-day', type=int, default=20220626, help='Date from 20220625 to 20220630')
     parser.add_argument('--end-day', type=int, default=20220626, help='Date from 20220625 to 20220630')
@@ -273,27 +274,26 @@ if __name__ == "__main__":
     with torch.no_grad():   
         for idx, key in enumerate(hst_users_items.keys()):
             # print(i)
-            if idx >= 3000:
+            if idx > 200:
                 break
             # print(eval_users_info[key])
             if len(eval_users_info[key][0]) == 0:
                 # print("Empty Film Item")
                 continue
             heldout_batch_key = onehot_film.transform(eval_users_info[key])[0]
-            pred_key = []
             hst_films_key = hst_users_items[key]
             ccai_embedding = get_ft_user(key)
             if ccai_embedding is None:
                 continue
             heldout_batch.append(heldout_batch_key)
-            ccai_embedding = torch.cat(args.batch_size*[ccai_embedding.unsqueeze(0)], 0)
+            ccai_embedding = torch.cat(length_list_ft_film*[ccai_embedding.unsqueeze(0)], 0)
             fe_hst_items = []
             list_rating = []
             for (film_id,partition, watch_duration) in hst_films_key:
                 batch_fe_item = []
                 fe_item = dict_fe_item[film_id]
                 for i in range(8):
-                    ft_i = torch.cat(args.batch_size*[fe_item[i]], 0)
+                    ft_i = torch.cat(length_list_ft_film*[fe_item[i]], 0)
                     batch_fe_item.append(ft_i)
                     
                 if watch_duration > opt.duration_threshold:
@@ -305,38 +305,22 @@ if __name__ == "__main__":
                 # else:
                 #     rating = watch_duration/dict_film_durations[int(film_id)][0]
                 # print(rating)      
-                rating = torch.cat(args.batch_size*[torch.tensor([rating])], 0)
+                rating = torch.cat(length_list_ft_film*[torch.tensor([rating])], 0)
                 
                 list_rating.append(rating)
-                fe_hst_items.append(batch_fe_item)
-
-            nb_batch = (length_list_ft_film // args.batch_size) + 1
-            pred_user = []
-            for i in range(nb_batch):
-                fe_hst_items1 = deepcopy(fe_hst_items)
-                list_rating1 = deepcopy(list_rating)
-                z = min(args.batch_size*(i+1), length_list_ft_film)
-                len_batch = z - args.batch_size*i
-                batch_ft_film = []
-                for i1 in range(8):
-                    batch_ft_film.append(list_ft_film[i1][args.batch_size*i: z])
-                if len_batch < args.batch_size:
-                    for i2 in range(len(hst_films_key)): 
-                        list_rating1[i2] = list_rating[i2][:len_batch] 
-                        for i3 in range(len(fe_hst_items1[i2])):
-                            fe_hst_items1[i2][i3] = fe_hst_items1[i2][i3][:len_batch]   
-                
-                inputs = (fe_hst_items1, batch_ft_film, ccai_embedding[:len_batch], list_rating1)
-                # print(summary(model, inputs))
-                # print(model)
-                outputs = model(inputs)
-                outputs = outputs[:, 0].detach().cpu().numpy()
-                pred_user.extend(outputs)
-            # pred_key.append(outputs[:, 0].detach().cpu().numpy())
+                fe_hst_items.append(batch_fe_item) 
+            fe_hst_items1 = deepcopy(fe_hst_items)  
+            list_ft_film1 = deepcopy(list_ft_film)
+            print(ccai_embedding.size())
+            inputs = (fe_hst_items1, list_ft_film1, ccai_embedding, list_rating)
+            # print(summary(model, inputs))
+            # print(model)
+            outputs = model(inputs)
+            outputs = outputs[:, 0].detach().cpu().numpy()
             if args.mask:
                 for index in dict_mask_index_film_user[key]:
-                    pred_user[index] = 0     
-            pred.append(pred_user)
+                    outputs[index] = 0     
+            pred.append(outputs)
             
     pred = np.array(pred)
     heldout_batch = sparse.csr_matrix(np.array(heldout_batch))
@@ -350,9 +334,3 @@ if __name__ == "__main__":
     
     print("NDCG MEAN: ")
     print(sum(ndcg_)/len(ndcg_))
-    
-                
-                
-                
-            
-        
