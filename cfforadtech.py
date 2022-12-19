@@ -64,15 +64,21 @@ tmp_table
 
 tmp_table.iat[0,1]=9999
 
-for cat_id in enumerate(tmp_table, 1):
-  col = tmp_table.iloc[:,cat_id]
-  print(type(col))
+for icol in range(0, len(tmp_table)):
+  '''
+  modified by cell iter
+  '''
+  cat_id = icol + 1 
+  col = tmp_table.iloc[:,icol]
+  print(col)
   for user_id, score in enumerate(col, 1):
-    print(user_id, score)
+    irow = user_id - 1
+    print('user_id & score',user_id, score)
     if score == 0:
-      col[] = fill_missing_score(cat_id, user_id)
-      
-      tmp_table.iat[irow,icol]
+      predict_value = fill_missing_score(cat_id, user_id, user_ratings_table_normed)
+      print('predict_value:', predict_value)
+      # modified at irow, icol
+      tmp_table.iat[irow,icol] = predict_value
     # break
   break
 
