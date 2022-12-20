@@ -2,6 +2,7 @@ http://10.255.60.6/vu/research-recommendation-system/tree/develop/GEM-2022/Thang
 http://10.255.60.6/vu/research-recommendation-system/tree/develop/GEM-2022/Thang%2012/Tai%20lieu
 http://10.255.60.6/vu/research-recommendation-system/tree/develop/GEM-2022/Thang%2012/bbnt
 http://10.255.60.6/thangnq26/vtg_os_etl/tree/gem-2022/GEM_2022/Thang%2012/%20Model%20RM%20h%E1%BB%99%20gia%20%C4%91%C3%ACnh
+http://10.255.60.6/vu/research-recommendation-system/blob/develop/GEM-2022/Thang%2012/RCM-Adtech
 
 # tai lieu adtech
 https://medium0.com/@aliozan_memetoglu/4-collaborative-filtering-and-knn-f997f8993256?source=user_profile---------3----------------------------
