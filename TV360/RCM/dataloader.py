@@ -184,7 +184,25 @@ def get_record_by_item_id(item_id, pd_film_series):
     record = pd_film_series[pd_film_series['series_id'] == int(item_id)].to_dict('records')[0]
     return record
 
-
+def get_ft_user(ccai, onehot_province_user, user_id):
+    try:
+        user_info = ccai[ccai["profile_id"] == int(user_id)].to_dict('records')[0]
+        if type(user_info['province_name']) == str:
+            onehot_province_user = onehot_province_user.transform([[user_info['province_name']]])[0]
+        else:
+            onehot_province_user = onehot_province_user.transform([[""]])[0]
+    except:
+        return None              
+        
+    gender = user_info['gender']
+    age = user_info['age']    
+    if math.isnan(gender):
+        return None
+    if math.isnan(age):
+        return None              
+    ccai_embedding = np.hstack((np.array([gender, age]), onehot_province_user))
+    ccai_embedding = torch.FloatTensor(ccai_embedding)
+    return ccai_embedding
 
 class Tv360Dataset(data.Dataset):
     def __init__(self, target_users_items, phase="train"):
@@ -194,18 +212,12 @@ class Tv360Dataset(data.Dataset):
         self.target_users_items = target_users_items[phase]
         self.labels = [it[3] for it in self.target_users_items]
         # self.rating_imdb_rating = {}
-        self.pd_film_series = pd.read_csv(opt.folder + "data/" + opt.path_film_series)
-        dict_film_durations = self.pd_film_series[["series_id", "duration"]]
-        self.dict_film_durations = dict_film_durations.set_index('series_id').T.to_dict('list')
-        self.pd_film_series_drop_nan = pd.read_csv(opt.folder + "data/" + opt.path_film_series)
-        self.pd_film_series_drop_nan.dropna(inplace=True)
         # print(self.pd_film_series['series_id'])
         self.list_ft_user = {}
-        self.list_ft_item = {}
         self.onehot_province_user = OneHotEncoder(handle_unknown='ignore', sparse=False)
         self.onehot_province_user.fit(self.ccai_drop_nan[['province_name']])
 
-        raw_features_file = '/home/admin1/mnt_raid/source/tuanvm/AirFlow/airflow-tutorial/TV360/RCM/raw_features_unnormal.pickle'
+        raw_features_file = 'raw_features_unnormal.pickle'
         with open(raw_features_file, 'rb') as f:
             self.data = pickle.load(f)
         
@@ -265,3 +277,61 @@ class Tv360Dataset(data.Dataset):
                 return None
             fe_hst_items.append(ebd)
         return (fe_hst_items, fe_record_trg_item, ccai_embedding, list_rating), self.labels[idx]
+    
+    
+class EvalTv360Dataset(data.Dataset):
+    def __init__(self, target_users_items):
+        self.ccai = pd.read_csv(opt.folder + opt.path_file_user_info)
+        self.ccai_drop_nan = pd.read_csv(opt.folder + opt.path_file_user_info)
+        self.ccai_drop_nan.dropna(inplace=True)
+        self.target_users_items = target_users_items
+        # self.rating_imdb_rating = {}
+        # print(self.pd_film_series['series_id'])
+        self.list_ft_user = {}
+        self.onehot_province_user = OneHotEncoder(handle_unknown='ignore', sparse=False)
+        self.onehot_province_user.fit(self.ccai_drop_nan[['province_name']])
+
+        raw_features_file = 'raw_features_unnormal.pickle'
+        with open(raw_features_file, 'rb') as f:
+            self.data = pickle.load(f)
+
+    def __len__(self):
+        return len(self.target_users_items)
+
+    def __getitem__(self, idx):
+        # key, list_hst_key, target_item, label
+        user_id, list_hst_item_id, target_item = self.target_users_items[idx]
+        list_rating = []
+        # CCAI Embedding
+        if self.list_ft_user.get(int(user_id)) is not None:
+            ccai_embedding = self.list_ft_user[int(user_id)]
+        else:
+            ccai_embedding = get_ft_user(self.ccai, self.onehot_province_user, user_id)
+            self.list_ft_user[int(user_id)] = ccai_embedding
+        if ccai_embedding is None:
+            return None   
+        # Feature Target Item
+        fe_record_trg_item = self.data[str(target_item)]
+        if fe_record_trg_item is None:
+            return None
+        # Feature History Items
+        fe_hst_items = []
+        for (item_hst_id, _, total_watch_duration) in list_hst_item_id:
+            # duration = dict_films_duration[int(item_id)][0]
+            # prefer = float(total_watch_duration) / float(duration)
+            if total_watch_duration >= opt.duration_threshold:
+                rating = 1
+            else:
+                rating = float(total_watch_duration) / opt.duration_threshold
+            # if total_watch_duration >= self.dict_film_durations[int(item_hst_id)][0]:
+            #     rating = 1
+            # else:
+            #     rating = float(total_watch_duration) / self.dict_film_durations[int(item_hst_id)][0]
+            # rating = float(total_watch_duration) / opt.duration_threshold    
+            # rating = min(float(total_watch_duration) / float(duration), 1)
+            list_rating.append(rating)
+            ebd = self.data[item_hst_id]
+            if ebd is None:
+                return None
+            fe_hst_items.append(ebd)
+        return (fe_hst_items, fe_record_trg_item, ccai_embedding, list_rating), int(user_id)
