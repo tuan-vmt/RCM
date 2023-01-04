@@ -4,6 +4,30 @@ http://10.255.60.6/vu/research-recommendation-system/tree/develop/GEM-2022/Thang
 http://10.255.60.6/thangnq26/vtg_os_etl/tree/gem-2022/GEM_2022/Thang%2012/%20Model%20RM%20h%E1%BB%99%20gia%20%C4%91%C3%ACnh
 http://10.255.60.6/vu/research-recommendation-system/blob/develop/GEM-2022/Thang%2012/RCM-Adtech
 
+----LIST DAY----
+import os
+from datetime import datetime, timezone, timedelta
+
+a =datetime.now()
+print(a.strftime('%Y%m%d'))
+list_file = sorted(os.listdir("f_tv360_log_film_daily/"))
+print(list_file)
+
+path_list_file_log_film = []
+today = "20220701"
+numbers_of_day = 30
+for i in range(1, numbers_of_day + 1):
+    given_date = datetime.strptime(today, '%Y%m%d')
+    past_date = given_date - timedelta(days=i)
+    past_date_str = past_date.strftime('%Y%m%d')
+    file_path = "/home/gem/Pictures/RCM/f_tv360_log_film_daily/" + "log_film_daily_from_" + past_date_str + ".csv"
+    if os.path.exists(file_path):
+        print("HIHI")
+        exit()
+    path_list_file_log_film.append("log_film_daily_from_" + past_date_str + ".csv")
+print(path_list_file_log_film)
+
+
 from airflow.models import DagBag
 dag_ids = DagBag(include_examples=False).dag_ids
 for id in dag_ids:
